@@ -62,12 +62,14 @@ define([
             this.delegateEvents(this.events);
 
             this.setVisible(false);
+            this.isSimulationControlsPanelVisible = false;
 
             // close previously running simulation
             if (this.isSimulating) {
                 this.toggleSimulation();
             }
 
+            this.simulationControlsTrigger = $("#simulation-controls-trigger");
             this.$currentTimeInput = $("#map-controls-current-time");
             this.$playButton = $("#play-pause-button");
             this.$forwardButton = $("#forward-button");
@@ -75,12 +77,16 @@ define([
             this.$backwardButton = $("#backward-button");
             this.$fastBackwardButton = $("#fast-backward-button");
             this.$legend = $("#legend");
+            this.$simulationCompletionContainer = $("#simulation-completion-container");
+            this.$simulationCompletionRange = $("#simulation-completion-range");
+            this.$simulationCompletionOutput = $("#simulation-completion-output");
 
             // render configure controls modal along with the default step sizes
             configureControlsModal.render(this.stepSizes);
 
         },
         events: {
+            "click #simulation-controls-trigger": "minimizeMaximize",
             "click #play-pause-button": "toggleSimulation",
             "change #show-path-trace-checkbox": "togglePathPolylines",
             "change #show-routes-checkbox": "delegateToggleRoutePolylines",
@@ -90,9 +96,14 @@ define([
             "click #fast-backward-button": function() {this.skipSimulation("fb")},
             "click #configure-controls-link": "showConfigureControlsModal",
             "input #interpolation-animation-duration-input": "updateInterpolationAnimationDuration",
-            "input #refresh-interval-input": "updateTimerRefreshInterval"
+            "input #refresh-interval-input": "updateTimerRefreshInterval",
+            "input #simulation-completion-range": "onSimulationCompletionRangeSlide"
         },
-        setVisible: function (shouldSetVisible) {
+        /**
+         * shouldMinimize is only used if shouldSetVisible is false. It is basically used to minimize simulation
+         * controls panel instead of completely hiding it.
+         */
+        setVisible: function (shouldSetVisible, shouldMinimize) {
             if (shouldSetVisible) {
                 this.$mapControls.animate({
                     marginBottom: "0"
@@ -109,11 +120,31 @@ define([
                         }).tooltip("show");
                     }, 1000);
                 }
+
+                this.isSimulationControlsPanelVisible = true;
             } else {
                 var height = this.$mapControls.height();
+
                 this.$mapControls.animate({
-                    marginBottom: -height - 50
+                    marginBottom: !shouldMinimize ? -height - 100: -height - 46
                 }, 300);
+
+                this.isSimulationControlsPanelVisible = false;
+            }
+        },
+        minimizeMaximize: function () {
+            if (this.isSimulationControlsPanelVisible) {
+                this.simulationControlsTrigger.find(".glyphicon")
+                    .removeClass()
+                    .addClass("glyphicon glyphicon-chevron-up");
+
+                this.setVisible(false, true);
+            } else {
+                this.simulationControlsTrigger.find(".glyphicon")
+                    .removeClass()
+                    .addClass("glyphicon glyphicon-chevron-down");
+
+                this.setVisible(true);
             }
         },
         reset: function () {
@@ -130,9 +161,11 @@ define([
             switch (this.mode) {
                 case "live":
                     this.timerRefreshInterval = 1000;
+                    this.$simulationCompletionContainer.hide(); // completion slider not needed in live mode
                     break;
                 case "nonlive":
                     this.timerRefreshInterval = 300;
+                    this.$simulationCompletionContainer.show();
                     break;
                 default:
                     throw new Error("mode can only be 'live' or 'nonlive'");
@@ -142,6 +175,8 @@ define([
             this.timeSpan = allVehicleCollection.getTimeSpan();
             this.currentTime = this.timeSpan.startTime;
             this.updateTimer();
+
+            this.updateSimulationCompletion();
 
             mapView.assignMarkerColors();
             this.updateLegend();
@@ -207,6 +242,8 @@ define([
                     }
 
                     self.updateTimer();
+
+                    self.updateSimulationCompletion();
 
                     mapView.updateMarkers(self.currentTime, self.arePathPolylinesVisible, self.interpolationAnimationDuration);
                 }, this.timerRefreshInterval);
@@ -275,12 +312,15 @@ define([
             }
 
             this.updateTimer();
+            this.updateSimulationCompletion();
             this.updateControlsAndOptionsVisiblity();
             mapView.updateMarkers(this.currentTime, this.arePathPolylinesVisible, this.interpolationAnimationDuration);
         },
         updateControlsAndOptionsVisiblity: function () {
             if (this.isSimulating) {
                 this.$playButton.siblings().attr("disabled", "disabled");
+
+                this.$simulationCompletionRange.attr("disabled", "disabled");
 
                 $("#refresh-interval-input").attr("disabled", "disabled");
             } else {
@@ -299,6 +339,8 @@ define([
                     this.$backwardButton.removeAttr("disabled");
                     this.$fastBackwardButton.removeAttr("disabled");
                 }
+
+                this.$simulationCompletionRange.removeAttr("disabled");
 
                 $("#refresh-interval-input").removeAttr("disabled");
             }
@@ -328,6 +370,25 @@ define([
                     }
                 }
             }
+        },
+        updateSimulationCompletion: function () {
+            var completion = Math.round(
+                (this.currentTime - this.timeSpan.startTime) / (this.timeSpan.endTime - this.timeSpan.startTime) * 100
+            );
+
+            this.$simulationCompletionOutput.text(completion + "%");
+            this.$simulationCompletionRange.val(completion);
+        },
+        onSimulationCompletionRangeSlide: function () {
+            this.currentTime = Math.round(
+                ((this.$simulationCompletionRange.val() / 100) * (this.timeSpan.endTime - this.timeSpan.startTime))
+                + this.timeSpan.startTime
+            );
+
+            this.updateSimulationCompletion();
+            this.updateTimer();
+            this.updateControlsAndOptionsVisiblity();
+            mapView.updateMarkers(this.currentTime, this.arePathPolylinesVisible, this.interpolationAnimationDuration);
         }
     });
 
